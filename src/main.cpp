@@ -53,7 +53,7 @@
 
 /*--------ACTIVAR/DESACTIVAR DEPURACION----------*/
 #define DEBUG_CMD "starship"  // Codigo de acceso
-bool debugEnabled = true;  // Habilita/Deshabilita depuracion   //dejarlo en false
+bool debugEnabled = false;  // Habilita/Deshabilita depuracion   //dejarlo en false
 #define DEBUG_PRINT(x)  if(debugEnabled) { Serial.print(x); }
 #define DEBUG_PRINTLN(x)  if(debugEnabled) { Serial.println(x); }
 
@@ -87,7 +87,7 @@ bool debugEnabled = true;  // Habilita/Deshabilita depuracion   //dejarlo en fal
 
 
 /*--------SERVIDOR NTP----------*/
-const char* ntpServer = "192.168.239.161";         //Servidor NTP TDV 131.107.32.217 
+const char* ntpServer = "131.107.32.217";         //Servidor NTP TDV 131.107.32.217 
 const long gmtOffset_sec = -5*3600;                //Desplazamiento GMT
 const int daylightOffset_sec = 0;                  //Compensacion de luz diurna
 ESP32Time rtc_esp32;
@@ -198,13 +198,13 @@ Serial.println("\n\nNo se pudo actualizar Tiempo de ESP32 y DS3231");
 
 
 /*--------WIFI----------*/
-const char *wifi_ssid = "starlink";                    //WF_TDV_PLC 
-const char *wifi_password = "70322511";                //M4qPLC$*-+/
-IPAddress local_IP(192, 168, 239, 168);                 //IPAddress local_IP(172, 16, 2, 201);
-IPAddress gateway(192, 168, 239, 94);                   //IPAddress gateway(172, 16, 2, 1);
-IPAddress subnet(255, 255, 255, 0);                    //IPAddress subnet(255, 255, 254, 0);
-IPAddress primary_dns(192, 168, 239, 94);              //131, 107, 32, 217
-IPAddress secondary_dns(192, 168, 239, 94);            //131, 107, 32, 218
+const char *wifi_ssid = "WF_TDV_PLC";                    //WF_TDV_PLC 
+const char *wifi_password = "M4qPLC$*-+/";                //M4qPLC$*-+/
+IPAddress local_IP(172, 16, 2, 210);                 //IPAddress local_IP(172, 16, 2, 201);
+IPAddress gateway(172, 16, 2, 1);                   //IPAddress gateway(172, 16, 2, 1);
+IPAddress subnet(255, 255, 254, 0);                    //IPAddress subnet(255, 255, 254, 0);
+IPAddress primary_dns(131, 107, 32, 217);              //131, 107, 32, 217
+IPAddress secondary_dns(131, 107, 32, 218);            //131, 107, 32, 218
 
 unsigned long ultimoIntento = 0;   
 int countReconectWifi = 0;
@@ -262,27 +262,27 @@ void reconnectWiFi() {
 
 /*--------VARIABLES GLOVALES----------*/
 
-String url_api = "http://192.168.239.161/BackEnd2/api/Rectilineo/Write"; //http://192.168.54.161/BackEnd2/api/Rectilineo/Write
+String url_api = "https://developer.textildelvalle.pe:444/TEJRectilineoParoBE/api/RectilineoEvento/Write"; //http://192.168.54.161/BackEnd2/api/Rectilineo/Write
 
 
 const char* codDevice = "DeviceTejRecJ2";
 const char* codMaquina = "J2";    
-const char* codParoIN1 = "MP001";    //PRODUCCION
-const char* codParoIN2 = "MP002";    //PARO MANUAL
-const char* codParoIN3 = "MP003";    //HILO LATERAL
-const char* codParoIN4 = "MP004";    //HILO SUPERIOR
-const char* codParoIN5 = "MP005";    //LYCRA
-const char* codParoIN6 = "MP006";    //CAIDA DE TELA
-const char* codParoIN7 = "MP007";    //ANTIRREMOTADA
-const char* codParoIN8 = "MP008";    //FIN DE PIEZA O [ RPM (COD:RPM)]
-const char* codParoIN9 = "MP009";    //PUERTA  
+const char* codParoIN1 = "MP001";      //START/STOP
+const char* codParoIN2 = "MP004";      //HILO SUPERIOR
+const char* codParoIN3 = "MP003";      //HILO LATERAL
+const char* codParoIN4 = "MP007";      //ANTIRREMOTADA
+const char* codParoIN5 = "MP009";      //PUERTA
+const char* codParoIN6 = "MP006";      //CAIDA DE TELA 
+const char* codParoIN7 = "MP005";      //LYCRA
+const char* codParoIN8 = "MP008";      //PUERTA LATERAL
+const char* codParoIN9 = "RPM";        //RPM 
 const char* codParoIN10 = "CONTADOR";  //CONTADOR DE UNIDADES
 
 /*--------CONTADOR DE UNIDADES----------*/
 volatile unsigned long count = 0;    
 
 /*--------DEFINE EL INTERVALO DE TIEMPO DE ENVIO SI HAY DATOS GUARDADOS----------*/
-int timeupdateSendHTTP = 10;
+int timeupdateSendHTTP = 15;
 const unsigned long interval1 = timeupdateSendHTTP * 60 * 1000; 
 unsigned long previousTime1 = 0;
 
@@ -386,7 +386,7 @@ void updateReleStatusInput() {
     digitalWrite(RL1, LOW);
    }
 
-  if (digitalRead(IN3) == HIGH || digitalRead(IN4) == HIGH || digitalRead(IN5) == HIGH || digitalRead(IN6) == HIGH || digitalRead(IN7) == HIGH || digitalRead(IN9) == HIGH)
+  if (digitalRead(IN3) == LOW || digitalRead(IN4) == LOW || digitalRead(IN5) == LOW || digitalRead(IN6) == LOW || digitalRead(IN7) == LOW || digitalRead(IN9) == LOW)
    { digitalWrite(RL2, HIGH);
    } else {
     digitalWrite(RL2, LOW);
@@ -698,31 +698,31 @@ void setup()
 
   
  debouncer1.attach(IN1);
- debouncer1.interval(5); // intervalo en ms
+ debouncer1.interval(600); // intervalo en ms
 
  debouncer2.attach(IN2);
- debouncer2.interval(5); // intervalo en ms
+ debouncer2.interval(900); // intervalo en ms
 
  debouncer3.attach(IN3);
- debouncer3.interval(5); // intervalo en ms
+ debouncer3.interval(900); // intervalo en ms
  
  debouncer4.attach(IN4);
- debouncer4.interval(5); // intervalo en ms
+ debouncer4.interval(600); // intervalo en ms
  
  debouncer5.attach(IN5);
- debouncer5.interval(5); // intervalo en ms
+ debouncer5.interval(600); // intervalo en ms
  
  debouncer6.attach(IN6);
- debouncer6.interval(5); // intervalo en ms
+ debouncer6.interval(1000); // intervalo en ms   //aumentar si es preciso ya que da muchos activaciones caida de tela
  
  debouncer7.attach(IN7);
- debouncer7.interval(5); // intervalo en ms
+ debouncer7.interval(600); // intervalo en ms
  
  debouncer8.attach(IN8);
- debouncer8.interval(5); // intervalo en ms
+ debouncer8.interval(600); // intervalo en ms
  
  debouncer9.attach(IN9);
- debouncer9.interval(5); // intervalo en ms
+ debouncer9.interval(600); // intervalo en ms
 
 
  // Comprueba y registra el estado inicial de las entradas digitales
@@ -748,44 +748,44 @@ void setup()
    }
 
    debouncer4.update();
- if (debouncer4.read() == HIGH) 
+ if (debouncer4.read() == LOW) 
    {
-   InputInfo initialInfo4 = {IN4, HIGH};
+   InputInfo initialInfo4 = {IN4, LOW};
    xQueueSend(queue, &initialInfo4, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
    }
 
    debouncer5.update();
- if (debouncer5.read() == HIGH) 
+ if (debouncer5.read() == LOW) 
    {
-   InputInfo initialInfo5 = {IN5, HIGH};
+   InputInfo initialInfo5 = {IN5, LOW};
    xQueueSend(queue, &initialInfo5, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
    }
 
    debouncer6.update();
- if (debouncer6.read() == HIGH) 
+ if (debouncer6.read() == LOW) 
    {
-   InputInfo initialInfo6 = {IN6, HIGH};
+   InputInfo initialInfo6 = {IN6, LOW};
    xQueueSend(queue, &initialInfo6, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
    }
 
    debouncer7.update();
- if (debouncer7.read() == HIGH) 
+ if (debouncer7.read() == LOW) 
    {
-   InputInfo initialInfo7 = {IN7, HIGH};
+   InputInfo initialInfo7 = {IN7, LOW};
    xQueueSend(queue, &initialInfo7, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
    }
 
    debouncer8.update();
- if (debouncer8.read() == HIGH) 
+ if (debouncer8.read() == LOW) 
    {
-   InputInfo initialInfo8 = {IN8, HIGH};
+   InputInfo initialInfo8 = {IN8, LOW};
    xQueueSend(queue, &initialInfo8, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
    }
 
    debouncer9.update();
- if (debouncer9.read() == HIGH) 
+ if (debouncer9.read() == LOW) 
    {
-   InputInfo initialInfo9 = {IN9, HIGH};
+   InputInfo initialInfo9 = {IN9, LOW};
    xQueueSend(queue, &initialInfo9, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
    }
 
@@ -1097,6 +1097,7 @@ void loop()
   
 
  /*-------------------------DIGITAL IMPUT 3---------------------------*/
+/* NO ACTIVO EN   J2
   if(info.pin == IN3)
 
   {
@@ -1208,9 +1209,701 @@ void loop()
     }
      
   }
+*/
+  
+
+ /*-------------------------DIGITAL IMPUT 4---------------------------*/
+  if(info.pin == IN4)
+
+  {
+     static String  codStaticIN4 = "";
+
+        if(info.state == LOW) 
+
+        {  codStaticIN4 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
+ 
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                        
+    json["CodMaquina"] = codMaquina,                  
+    json["CodParo"] = codParoIN4,                    
+    json["CodUnicoParo"] = codStaticIN4,          
+    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
+    json["FechaHoraFinParo"] = "",          
+    json["Rpm"] = 0,                                      
+
+   //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+    
+
+    }
+     
+  } 
+        
+ else
+        
+ {
+
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                              
+    json["CodMaquina"] = codMaquina,                 
+    json["CodParo"] = codParoIN4,                   
+    json["CodUnicoParo"] = codStaticIN4,          
+    json["FechaHoraIniParo"] = "",     
+    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
+    json["Rpm"] = 0,                                      
+
+    //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+
+      }
+
+      codStaticIN4 = "";
+   
+    }
+     
+  }
 
   
 
+ /*-------------------------DIGITAL IMPUT 5---------------------------*/
+ /* NO ACTIVO EN   J2
+  if(info.pin == IN5)
+
+  {
+     static String  codStaticIN5 = "";
+
+        if(info.state == LOW) 
+
+        {  codStaticIN5 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
+ 
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                        
+    json["CodMaquina"] = codMaquina,                  
+    json["CodParo"] = codParoIN5,                    
+    json["CodUnicoParo"] = codStaticIN5,          
+    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
+    json["FechaHoraFinParo"] = "",          
+    json["Rpm"] = 0,                                      
+
+   //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+    
+
+    }
+     
+  } 
+        
+ else
+        
+ {
+
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                              
+    json["CodMaquina"] = codMaquina,                 
+    json["CodParo"] = codParoIN5,                   
+    json["CodUnicoParo"] = codStaticIN5,          
+    json["FechaHoraIniParo"] = "",     
+    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
+    json["Rpm"] = 0,                                      
+
+    //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+
+      }
+
+      codStaticIN5 = "";
+   
+    }
+     
+  }
+*/
+  
+
+ /*-------------------------DIGITAL IMPUT 6---------------------------*/
+  if(info.pin == IN6)
+
+  {
+     static String  codStaticIN6 = "";
+
+        if(info.state == LOW) 
+
+        {  codStaticIN6 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
+ 
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                        
+    json["CodMaquina"] = codMaquina,                  
+    json["CodParo"] = codParoIN6,                    
+    json["CodUnicoParo"] = codStaticIN6,          
+    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
+    json["FechaHoraFinParo"] = "",          
+    json["Rpm"] = 0,                                      
+
+   //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+    
+
+    }
+     
+  } 
+        
+ else
+        
+ {
+
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                              
+    json["CodMaquina"] = codMaquina,                 
+    json["CodParo"] = codParoIN6,                   
+    json["CodUnicoParo"] = codStaticIN6,          
+    json["FechaHoraIniParo"] = "",     
+    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
+    json["Rpm"] = 0,                                      
+
+    //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+
+      }
+
+      codStaticIN6 = "";
+   
+    }
+     
+  }
+
+  
+
+ /*-------------------------DIGITAL IMPUT 7---------------------------*/
+ /* NO ACTIVO EN   J2
+  if(info.pin == IN7)
+
+  {
+     static String  codStaticIN7 = "";
+
+        if(info.state == LOW) 
+
+        {  codStaticIN7 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
+ 
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                        
+    json["CodMaquina"] = codMaquina,                  
+    json["CodParo"] = codParoIN7,                    
+    json["CodUnicoParo"] = codStaticIN7,          
+    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
+    json["FechaHoraFinParo"] = "",          
+    json["Rpm"] = 0,                                      
+
+   //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+    
+
+    }
+     
+  } 
+        
+ else
+        
+ {
+
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                              
+    json["CodMaquina"] = codMaquina,                 
+    json["CodParo"] = codParoIN7,                   
+    json["CodUnicoParo"] = codStaticIN7,          
+    json["FechaHoraIniParo"] = "",     
+    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
+    json["Rpm"] = 0,                                      
+
+    //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+
+      }
+
+      codStaticIN7 = "";
+   
+    }
+     
+  }
+*/
+  
+
+ /*-------------------------DIGITAL IMPUT 8---------------------------*/
+ /* NO ACTIVO EN   J2
+  if(info.pin == IN8)
+
+  {
+     static String  codStaticIN8 = "";
+
+        if(info.state == LOW) 
+
+        {  codStaticIN8 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
+ 
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                        
+    json["CodMaquina"] = codMaquina,                  
+    json["CodParo"] = codParoIN8,                    
+    json["CodUnicoParo"] = codStaticIN8,          
+    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
+    json["FechaHoraFinParo"] = "",          
+    json["Rpm"] = 0,                                      
+
+   //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+    
+
+    }
+     
+  } 
+        
+ else
+        
+ {
+
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                              
+    json["CodMaquina"] = codMaquina,                 
+    json["CodParo"] = codParoIN8,                   
+    json["CodUnicoParo"] = codStaticIN8,          
+    json["FechaHoraIniParo"] = "",     
+    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
+    json["Rpm"] = 0,                                      
+
+    //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+
+      }
+
+      codStaticIN8 = "";
+   
+    }
+     
+  }
+*/
+  
+
+ /*-------------------------DIGITAL IMPUT 9---------------------------*/
+  if(info.pin == IN9)
+
+  {
+     static String  codStaticIN9 = "";
+
+        if(info.state == LOW) 
+
+        {  codStaticIN9 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
+ 
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                        
+    json["CodMaquina"] = codMaquina,                  
+    json["CodParo"] = codParoIN9,                    
+    json["CodUnicoParo"] = codStaticIN9,          
+    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
+    json["FechaHoraFinParo"] = "",          
+    json["Rpm"] = 0,                                      
+
+   //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+    
+
+    }
+     
+  } 
+        
+ else
+        
+ {
+
+  //JSON  A ENVIAR POR POST
+    json.clear();                                                              
+    json["CodMaquina"] = codMaquina,                 
+    json["CodParo"] = codParoIN9,                   
+    json["CodUnicoParo"] = codStaticIN9,          
+    json["FechaHoraIniParo"] = "",     
+    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
+    json["Rpm"] = 0,                                      
+
+    //HTTP POST
+   http.begin(url_api);   
+   http.addHeader("Content-Type", "application/json"); 
+
+   int responseCode = http.POST(json.as<String>());
+
+   if (responseCode < 0)
+   {
+    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
+    http.end();
+   }
+
+   if (responseCode != 200)
+   {
+    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
+    DEBUG_PRINTLN(responseCode);
+    http.end();
+    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+   }
+
+   if (responseCode == 200)
+   {
+    String responseBody = http.getString();
+    DEBUG_PRINT("\n\nDatos enviados :  ");
+    DEBUG_PRINTLN(json.as<String>());
+ 
+    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
+    //delay(2000);
+    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
+    //Serial.println(codigoresponse);
+    //Serial.println(responseBody);"
+
+    http.end();
+
+      }
+
+      codStaticIN9 = "";
+   
+    }
+     
+  }
+
+  
 
 
 

@@ -267,12 +267,12 @@ String url_api = "https://developer.textildelvalle.pe:444/TEJRectilineoParoBE/ap
 
 const char* codDevice = "DeviceTejRecJ2";
 const char* codMaquina = "J2";    
-const char* codParoIN1 = "MP001";      //START/STOP
-const char* codParoIN2 = "MP004";      //HILO SUPERIOR
+const char* codParoIN1 = "MP001";      //START/STOP             si  HIGH
+const char* codParoIN2 = "MP004";      //HILO SUPERIOR          si  LOW
 const char* codParoIN3 = "MP003";      //HILO LATERAL
 const char* codParoIN4 = "MP007";      //ANTIRREMOTADA
-const char* codParoIN5 = "MP009";      //PUERTA
-const char* codParoIN6 = "MP006";      //CAIDA DE TELA 
+const char* codParoIN5 = "MP009";      //PUERTA                 si  LOW
+const char* codParoIN6 = "MP006";      //CAIDA DE TELA          si  LOW
 const char* codParoIN7 = "MP005";      //LYCRA
 const char* codParoIN8 = "MP008";      //PUERTA LATERAL
 const char* codParoIN9 = "RPM";        //RPM 
@@ -386,17 +386,13 @@ void updateReleStatusInput() {
     digitalWrite(RL1, LOW);
    }
 
+/*
   if (digitalRead(IN3) == LOW || digitalRead(IN4) == LOW || digitalRead(IN5) == LOW || digitalRead(IN6) == LOW || digitalRead(IN7) == LOW || digitalRead(IN9) == LOW)
    { digitalWrite(RL2, HIGH);
    } else {
     digitalWrite(RL2, LOW);
    }
-
-  if (digitalRead(IN2) == HIGH)
-   { digitalWrite(RL3, HIGH);
-   } else {
-    digitalWrite(RL3, LOW);
-   }
+*/
 
 }
 
@@ -636,7 +632,7 @@ void setup()
   if (attempts == MAX_ATTEMPTS) {
     Serial.println("\n\n No se pudo encontrar el modulo DS3231 valido");
     updateLedStatusRTC(); //alarma si no se logra actualizar datos de servidor ntp
-     //deberia activarse la alarma updateLedStatusRTC() por que no detectaria el año valido
+     //deberia activarse la alarma updateLedStatusRTC() por que no detectaria el año  valido
   }
 
 
@@ -734,9 +730,9 @@ void setup()
    }
  
  debouncer2.update();
- if (debouncer2.read() == HIGH)
+ if (debouncer2.read() == LOW)
    {
-   InputInfo initialInfo2 = {IN2, HIGH};
+   InputInfo initialInfo2 = {IN2, LOW};
    xQueueSend(queue, &initialInfo2, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
    }
 
@@ -987,7 +983,7 @@ void loop()
   {
      static String  codStaticIN2 = "";
 
-        if(info.state == HIGH) 
+        if(info.state == LOW) 
 
         {  codStaticIN2 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
  
@@ -1213,6 +1209,7 @@ void loop()
   
 
  /*-------------------------DIGITAL IMPUT 4---------------------------*/
+ /*NO ACTIVO EN J2
   if(info.pin == IN4)
 
   {
@@ -1324,11 +1321,11 @@ void loop()
     }
      
   }
-
+*/
   
 
  /*-------------------------DIGITAL IMPUT 5---------------------------*/
- /* NO ACTIVO EN   J2
+ 
   if(info.pin == IN5)
 
   {
@@ -1440,7 +1437,7 @@ void loop()
     }
      
   }
-*/
+
   
 
  /*-------------------------DIGITAL IMPUT 6---------------------------*/
@@ -1791,6 +1788,7 @@ void loop()
   
 
  /*-------------------------DIGITAL IMPUT 9---------------------------*/
+ /*NO ACTIVO EN J2
   if(info.pin == IN9)
 
   {
@@ -1902,8 +1900,7 @@ void loop()
     }
      
   }
-
-  
+*/
 
 
 

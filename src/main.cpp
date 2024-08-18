@@ -1,2145 +1,615 @@
 #include <WiFi.h>
 #include <Wire.h>
-#include <RTClib.h>
-#include <SPI.h>       
 #include <Arduino.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <ElegantOTA.h>
 #include "freertos/queue.h"
-#include <Bounce2.h>    
-#include <ESP32Time.h>  
-#include <HTTPClient.h>  
-#include <ArduinoJson.h> 
+#include <Bounce2.h>
+#include <ESP32Time.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include <FS.h>
 #include <LittleFS.h>
-#include <esp_system.h>  
+#include <esp_system.h>
+#include <esp_task_wdt.h>
+#include <sqlite3.h> // Biblioteca SQLite
+#include <SPI.h>
+#include <SD.h>
 
-///////!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"""""""""""""""""""22221111111111111111111"
-/*--------VERIFICAR DATOS----------*/
-/*
+//pio run --target uploadfs
 
+/*--------------------------------- Definiciones y Configuración ---------------------------------*/
 
+// Pines
+#define ledWifiOutput 21 // LED indicador de conexión WiFi
+#define relay1_Alarm 12  // Relé para alarma de temperatura de máquina
 
-
-//ATENCION!! SE CAMBIO LO SIGUIENTE PARA LA PRUEBA MATSUYA, DEVOLVER A SU ESTADO ORIGINAL
-// IMPUTS ACTIVAS EN J2 (IN= 1,2,3,5,6,8)- SE DESACTIVARON
-//SE CAMBIO NOMBRE DE MAQUINA DE J2 A M14
-//SE CAMBIO  HOSTNAME DE  DeviceTejRecJ2 A  DeviceTejRecM14
-//SE CAMBIO IP DE 172, 16, 2, 210  A   172, 16, 2, 234
-//SE AGREGO  A LA PARTE FINAL DEL LOOP (QUITAR):   
-                  Serial.print("\nIntensidad de la señal Wi-Fi (RSSI): ");
-                  Serial.print(WiFi.RSSI());
-                  Serial.println(" dBm");
-                  delay(1000);
-//SE AGREGO A LA FUNCION WIFI CODIGO PARA QUE MUESTRE MAC DE AP Y NOMBRE DE AP (PUEDE QUEDAR) 
-//CAMBIAR DE TRUE A FALSE EN ACTIVAR/DESACTIVAR DEPURACION
-//CAMBIAR TODOS LOS SERIALPRINT POR DEBUG_PRINT
-
-
-
-
-//falta el codigo en el .ini de littlefs
-
-//falta volver a la normalidad para no ver mensajes de depuracion
-
-//ste codigo envia el conteo de el pin10 cuando para el star(in1), esta bien para matzuyas pero borrr para el resto
-
-       SSID
-       PASSWORD
-       IP
-       GATEWAY
-       SUBNET
-       DNS 1
-       DNS 2
-
-       URL DE LA API
-
-       IP DEL SERVIDOR NTP
-
-       CODIGO DE MAQUINA
-      
-       INTERVALO DE TIEMPO DE ENVIO DESDE LITTLEFS
-
-       HOSTNAME DEL EQUIPO   EJEMPLO : DeviceTejRecR609
-
-
-
-
-
-*/
-
-
-/*--------ACTIVAR/DESACTIVAR DEPURACION----------*/
-#define DEBUG_CMD "starship"  // Codigo de acceso
-bool debugEnabled = false;  // Habilita/Deshabilita depuracion   //dejarlo en false
-#define DEBUG_PRINT(x)  if(debugEnabled) { Serial.print(x); }
-#define DEBUG_PRINTLN(x)  if(debugEnabled) { Serial.println(x); }
-
-
-/*--------IMPUT DIGITAL----------*/ //Tarj. Matzuya M.  out:  33, start :  23,  conteo:   35
-#define IN1 1                                           //PRODUCCION   
-#define IN2 2                                           //PARO MANUAL
-#define IN3 4                                           //HILO LATERAL
-#define IN4 5                                           //HILO SUPERIOR
-#define IN5 6                                           //LYCRA
-#define IN6 7                                           //CAIDA DE TELA
-#define IN7 8                                           //ANTIRREMOTADA
-#define IN8 9                                           //FIN DE PIEZA O RPM
-#define IN9 10                                          //PUERTA
-#define IN10 11                                         //CONTEO
-
-/*--------OUTPUT RELAY----------*/                                    
-#define RL1 12                                          
-#define RL2 13                                           
-#define RL3 14 
-
-/*--------LEDS INDICADORES----------*/
-#define LEDWIFI 21 
-#define LEDRTC 38 
-
-/*--------I2C PARA DS3231----------*/
-#define SDA_PIN 17
-#define SCL_PIN 18
-
-#define MAX_ATTEMPTS 10 //NUMERO DE INTENTOS PARA INICIAR DS3231 POR I2C
-
-
-/*--------SERVIDOR NTP----------*/
-const char* ntpServer = "131.107.32.217";         //Servidor NTP TDV 131.107.32.217 
-const long gmtOffset_sec = -5*3600;                //Desplazamiento GMT
-const int daylightOffset_sec = 0;                  //Compensacion de luz diurna
+// Configuración del servidor NTP para sincronización de tiempo
+const char* ntpServer = "time.google.com"; // Servidor NTP
+const long gmtOffset_sec = -5 * 3600;  // GMT-5 para Perú
+const int daylightOffset_sec = 0;
 ESP32Time rtc_esp32;
 
+// Configuración de WiFi
+const char *wifi_ssid = "MOVISTAR_1C30";
+const char *wifi_password = "PatfPhEeJuT53p8A2Hr5";
+IPAddress local_IP(192, 168, 1, 150);
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress primary_dns(8, 8, 8, 8);
+IPAddress secondary_dns(8, 8, 4, 4);
 
-RTC_DS3231 rtc_ds3231;
+// Variables para reconexión WiFi
+unsigned long ultimoIntento = 0;
+int countReconectWifi = 0;
+const int intervaloReconexion = 1000;
 
-DateTime now; //variable global para definir now que luego se usara para alamcenar el tiempo
-
-
-// Función que devuelve la fecha y la hora actual del RTC en formato (YYYYMMDDTHHMMSS)
-//Funcion para codigo unico de para y al final se le adjunta elcodigode la maquinaa la que pertenece
-//prueba poniendo R609  al final, sino funciona retirar R609.
-String getDateTimeCodeDS3231() {
-
-now = rtc_ds3231.now(); //Actualiza el tiempo en now desde DS3231 para usarlo en getDateTimeCodeDS3231() y getDateTimeDS3231()
-
-  char buf[64];
-  sprintf(buf, "%04d%02d%02d%02d%02d%02dR609", now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second());
-  return String(buf);
-}
-
-// Función que devuelve la fecha y la hora actual del RTC en formato ISO 8601 (YYYY-MM-DDTHH:MM:SS)
-String getDateTimeDS3231() {
-now = rtc_ds3231.now();
-//DateTime now = rtc_ds3231.now();
-  // Crear una cadena para almacenar la fecha y la hora formateada
-  char buf[64];
-
-  // Formatear la fecha y la hora y guardarla en la cadena creada
-  sprintf(buf, "%04d-%02d-%02dT%02d:%02d:%02d", now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second());
-
-  // Devolver la cadena con la fecha y la hora formateada
-  return String(buf);
-}
-
-
-
-/*--------ALARMA DE NO CONFIGURACION DE TIEMPO DS3231, INTERVALO PARDADEO LED----------*/ 
-unsigned long previousMillis_led_rtc = 0; 
-const long interval_led_rtc = 250; // Intervalo de parpadeo en milisegundos para alarma
-
-
-/*--------TIEMPO DE ESPERA PARA EJECUTAR CONFIGURACION SERVIDOR NTP----------*/
-unsigned long startTimeoutForNTP = 0; 
-bool timeoutOver = false; // Para saber si ya pasó el tiempo de espera
-
-
-/*--------FUNCIONES QUE SE EJECUTAN UNA SOLA VEZ----------*/
+// Indicador para ejecutar configuraciones una sola vez
 bool funcionYaEjecutada = false;
-bool funcionYaEjecutada2 = false;
 
-bool ledStatus = false;
+// Intervalo para guardar en memoria los datos de `tempMachine`
+int timeupdatewifi = 1000;
+const unsigned long interval2 = timeupdatewifi;
+unsigned long previousTime2 = 0;
 
+// Variables para la temperatura de la máquina y alarma
+float tempMachine;
+float setTemperature = 0.0;
 
-/*--------FUNCION PARA ALARMA DE NO CONFIGURACION DE TIMEPO DS3231----------*/
-void updateLedStatusRTC() {
-  unsigned long currentMillis_led_rtc = millis(); // Obtiene el tiempo actual
-  if (currentMillis_led_rtc - previousMillis_led_rtc >= interval_led_rtc) {
-    previousMillis_led_rtc = currentMillis_led_rtc;
-   if (digitalRead(LEDRTC) == LOW) {
-       digitalWrite(LEDRTC, HIGH);
-   } else {
-    digitalWrite(LEDRTC, LOW);
-    }
-  }
-}
+// Inicialización de servidores y bases de datos
+AsyncWebServer server(80);
+unsigned long ota_progress_millis = 0;
+char *zErrMsg = 0; // Mensaje de error para SQLite
+sqlite3 *db;
 
-/*--------FUNCION PARA EJECUTAR CONFIGURACION DE SERVIDOR NTP----------*/
+// Límite de registros en la tabla antes de crear una nueva base de datos y tabla
+const int tableRecordLimit = 3600;  //10000
+
+/*-------------------------- Funciones de Configuración --------------------------*/
+
+// Configuración inicial del servidor NTP para sincronizar el tiempo en ESP32
 void runSetupServerNTP() {
   if (!funcionYaEjecutada) {
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-	Serial.print("\n\n\nActualizando tiempo en ESP32 desde servidor NTP");
-  startTimeoutForNTP = millis(); // Guarda el tiempo de inicio del programa
+    Serial.println("Actualizando tiempo en ESP32 desde servidor NTP");
+    delay(2000);
+
+    Serial.print("La hora actualizada es: ");
+    Serial.println(rtc_esp32.getTime("%A, %B %d %Y %H:%M:%S"));
     funcionYaEjecutada = true;
   }
 }
 
-/*--------FUNCION PARA CONFIGURAR TIEMPO EN EL DS3231----------*/
-void updateTimeDevice() {
-  if (!funcionYaEjecutada2) {
-    if (rtc_esp32.getYear() > 2022) { 
-	 rtc_ds3231.adjust(DateTime(rtc_esp32.getYear(), rtc_esp32.getMonth()+1, rtc_esp32.getDay(), rtc_esp32.getHour(true), rtc_esp32.getMinute(), rtc_esp32.getSecond()));
-     Serial.print("\n\nConfigurando DS3231 :  "); 
-     Serial.print(rtc_esp32.getTime("%A, %B %d %Y %H:%M:%S"));
-	 if(rtc_ds3231.now().year() > 2022){
-    Serial.print("\n\nDS3231 Configurado desde ESP32"); 
-	funcionYaEjecutada2 = true;
-	timeoutOver = true; // Ya no necesitamos seguir comprobando
-  digitalWrite(LEDRTC, LOW);
-    if (ledStatus) {digitalWrite(LEDRTC, HIGH);} 
-	return;	
-	    }else{
-        Serial.println("\n\nFalla al configurar el DS3231 desde ESP32");
-      }
-    }
-  if(rtc_ds3231.now().year() > 2022){
-    Serial.println("\n\nDS3231 Ya se encuentra Configurado"); 
-	funcionYaEjecutada2 = true;	
-	timeoutOver = true; // Ya no necesitamos seguir comprobando
-  return;	
-	}
-
-updateLedStatusRTC(); //alarma si no se logra actualizar datos de servidor ntp
-Serial.println("\n\nNo se pudo actualizar Tiempo de ESP32 y DS3231"); 
-
-  }
-}
-
-
-
-/*--------WIFI----------*/
-const char *wifi_ssid = "WF_TDV_PLC";                    //WF_TDV_PLC 
-const char *wifi_password = "M4qPLC$*-+/";                //M4qPLC$*-+/
-IPAddress local_IP(172, 16, 2, 210);                 //IPAddress local_IP(172, 16, 2, 201);
-IPAddress gateway(172, 16, 2, 1);                   //IPAddress gateway(172, 16, 2, 1);
-IPAddress subnet(255, 255, 254, 0);                    //IPAddress subnet(255, 255, 254, 0);
-IPAddress primary_dns(131, 107, 32, 217);              //131, 107, 32, 217
-IPAddress secondary_dns(131, 107, 32, 218);            //131, 107, 32, 218
-
-unsigned long ultimoIntento = 0;   
-int countReconectWifi = 0;
-const int intervaloReconexion = 1000;
-
+// Maneja la reconexión al WiFi en caso de desconexión
 void reconnectWiFi() {
-  if (WiFi.status() != WL_CONNECTED) {   
-
+  if (WiFi.status() != WL_CONNECTED) {
     unsigned long tiempoActual = millis();
     if (tiempoActual - ultimoIntento >= intervaloReconexion) {
       ultimoIntento = tiempoActual;
-      
+
       if (countReconectWifi == 0) {
-        DEBUG_PRINT("\n\n\nReconectando a la red Wi-Fi  ");
+        Serial.print("Reconectando a la red Wi-Fi...");
         WiFi.disconnect();
 
-
-         // Usar IP estática y DNS                                        
-        if (!WiFi.config(local_IP, gateway, subnet, primary_dns, secondary_dns))   {  
-        DEBUG_PRINT("\n\nError al configurar la IP estática y DNS");    
+        if (!WiFi.config(local_IP, gateway, subnet, primary_dns, secondary_dns)) {
+          Serial.print("Error al configurar la IP estática y DNS");
         }
 
         WiFi.begin(wifi_ssid, wifi_password);
       }
-      
-      DEBUG_PRINT(".");
+
+      Serial.print(".");
       countReconectWifi++;
 
       if (countReconectWifi > 10) {
-        
-        DEBUG_PRINT("\n\nConexion WIFI Fallida Reintentando ");
+        Serial.print("Conexión WiFi fallida, reintentando...");
         countReconectWifi = 0;
       }
     }
   } else {
-
     if (countReconectWifi > 0) {
-    
-      DEBUG_PRINT("\n\n           Conexion WIFI Exitosa   ->    IP Tarjeta :  ");
-      DEBUG_PRINT(WiFi.localIP());
-      Serial.print("\n           Conectado a : ");
-      Serial.println(WiFi.SSID());  // Muestra el SSID de la red
-
-      Serial.print("           BSSID: ");
-      Serial.println(WiFi.BSSIDstr());  // Muestra la dirección BSSID del punto de acceso
-     
+      Serial.println("\nConexión WiFi exitosa");
+      Serial.print("IP: "); Serial.println(WiFi.localIP());
+      Serial.print("SSID: "); Serial.println(WiFi.SSID());
+      Serial.print("BSSID: "); Serial.println(WiFi.BSSIDstr());
+      Serial.print("Máscara de subred: "); Serial.println(WiFi.subnetMask());
+      Serial.print("Puerta de enlace: "); Serial.println(WiFi.gatewayIP());
+      Serial.print("DNS 1: "); Serial.println(WiFi.dnsIP(0));
+      Serial.print("DNS 2: "); Serial.println(WiFi.dnsIP(1));
+      Serial.print("RSSI: "); Serial.print(WiFi.RSSI()); Serial.println(" dBm");
     }
     countReconectWifi = 0;
 
     runSetupServerNTP();
-
-  }
-
-}
-
-
-
-
-
-
-/*--------VARIABLES GLOVALES----------*/
-
-String url_api = "https://developer.textildelvalle.pe:444/GENExtraccionSenalesBE/api/Evento/Write"; //http://192.168.54.161/BackEnd2/api/Rectilineo/Write
-
-
-const char* codDevice = "DeviceTejRecR609";
-const char* codMaquina = "R609";    
-const char* codParoIN1 = "MP001";      //START/STOP               HIGH
-const char* codParoIN2 = "MP002";      //HILO SUPERIOR            HIHG  /LOW para J2
-const char* codParoIN3 = "MP003";      //HILO LATERAL             HIGH
-const char* codParoIN4 = "MP004";      //ANTIRREMOTADA
-const char* codParoIN5 = "MP005";      //PUERTA                   LOW
-const char* codParoIN6 = "MP006";      //CAIDA DE TELA            LOW
-const char* codParoIN7 = "MP007";      //LYCRA
-const char* codParoIN8 = "MP008";      //PUERTA LATERAL           LOW
-const char* codParoIN9 = "RPM";        //RPM 
-const char* codParoIN10 = "CONTADOR";  //CONTADOR DE UNIDADES
-
-/*--------CONTADOR DE UNIDADES----------*/
-volatile unsigned long count = 0;    
-
-/*--------DEFINE EL INTERVALO DE TIEMPO DE ENVIO SI HAY DATOS GUARDADOS----------*/
-int timeupdateSendHTTP = 1;
-const unsigned long interval1 = timeupdateSendHTTP * 60 * 1000; 
-unsigned long previousTime1 = 0;
-
-/*--------DEFINE EL INTERVALO DE TIEMPO PARA VERIFICAR SI HAY ACTUALIZACIONES DE CODIGO DESDE SISTEMAS----------*/
-int timeupdatewifi = 100; //tiempo en minutos para actualizar credenciales wifi
-const unsigned long interval2 = timeupdatewifi * 60 * 1000; //Envio de datos para actualizar Wifi
-unsigned long previousTime2 = 0;
-
-
-
-
-
-DynamicJsonDocument json(2048);
-DynamicJsonDocument apiResponse(256);
-HTTPClient http;
-QueueHandle_t queue;  //Cola
-
-Bounce debouncer1 = Bounce();
-Bounce debouncer2 = Bounce();
-Bounce debouncer3 = Bounce();
-Bounce debouncer4 = Bounce();
-Bounce debouncer5 = Bounce();
-Bounce debouncer6 = Bounce();
-Bounce debouncer7 = Bounce();
-Bounce debouncer8 = Bounce();
-Bounce debouncer9 = Bounce();
-
-
-struct InputInfo
- {
-  uint8_t pin;
-  int state;
- };
-
-
-/*--------TAREA EN CORE 0 (LOOP-2)----------*/
-void Task1code( void * pvParameters ) {
-  for (;;) {
-   
-  if (debouncer1.update()) {
-    int value = debouncer1.read();
-    InputInfo info = {IN1, value};
-    xQueueSend(queue, &info, 0); //xQueueSend(queue, &info, portMAX_DELAY);
-  }
-  if (debouncer2.update()) {
-    int value = debouncer2.read();
-    InputInfo info = {IN2, value};
-    xQueueSend(queue, &info, 0); //xQueueSend(queue, &info, portMAX_DELAY);
-  }
-  if (debouncer3.update()) {
-    int value = debouncer3.read();
-    InputInfo info = {IN3, value};
-    xQueueSend(queue, &info, 0); //xQueueSend(queue, &info, portMAX_DELAY);
-  }
-  if (debouncer4.update()) {
-    int value = debouncer4.read();
-    InputInfo info = {IN4, value};
-    xQueueSend(queue, &info, 0); //xQueueSend(queue, &info, portMAX_DELAY);
-  }
-  if (debouncer5.update()) {
-    int value = debouncer5.read();
-    InputInfo info = {IN5, value};
-    xQueueSend(queue, &info, 0); //xQueueSend(queue, &info, portMAX_DELAY);
-  }
-  if (debouncer6.update()) {
-    int value = debouncer6.read();
-    InputInfo info = {IN6, value};
-    xQueueSend(queue, &info, 0); //xQueueSend(queue, &info, portMAX_DELAY);
-  }
-  if (debouncer7.update()) {
-    int value = debouncer7.read();
-    InputInfo info = {IN7, value};
-    xQueueSend(queue, &info, 0); //xQueueSend(queue, &info, portMAX_DELAY);
-  }
-  if (debouncer8.update()) {
-    int value = debouncer8.read();
-    InputInfo info = {IN8, value};
-    xQueueSend(queue, &info, 0); //xQueueSend(queue, &info, portMAX_DELAY);
-  }
-  if (debouncer9.update()) {
-    int value = debouncer9.read();
-    InputInfo info = {IN9, value};
-    xQueueSend(queue, &info, 0); //xQueueSend(queue, &info, portMAX_DELAY);
-  }
-
-
-
-
-    vTaskDelay(1); // Agrega un pequeño retardo para liberar el procesador
-  
   }
 }
 
-
-/*--------INDICADORES BALIZA RELE----------*/
-void updateReleStatusInput() {
-
-  if (digitalRead(IN1) == HIGH)
-   { digitalWrite(RL1, HIGH);
-   } else {
-    digitalWrite(RL1, LOW);
-   }
-
-/*
-  if (digitalRead(IN3) == LOW || digitalRead(IN4) == LOW || digitalRead(IN5) == LOW || digitalRead(IN6) == LOW || digitalRead(IN7) == LOW || digitalRead(IN9) == LOW)
-   { digitalWrite(RL2, HIGH);
-   } else {
-    digitalWrite(RL2, LOW);
-   }
-*/
-
-}
-
-
-/*--------LED SE ENCIENDE SI EL DEVICE ESTA CONECTADO A WIFI----------*/
-void updateLedStatusWifi() {
-  if (WiFi.status() != WL_CONNECTED) {
-    digitalWrite(LEDWIFI, LOW);  // Apagar LED
+// Inicializa el sistema de archivos LittleFS
+void initializeLittleFS() {
+  if (!LittleFS.begin()) {
+    Serial.println("Error al inicializar LittleFS, formateando...");
+    if (LittleFS.format()) {
+      Serial.println("Formateo de LittleFS completado");
+    } else {
+      Serial.println("Error al formatear LittleFS");
+      return;
+    }
+    if (!LittleFS.begin()) {
+      Serial.println("Error al inicializar LittleFS después de formatear");
+      return;
+    }
   } else {
-    digitalWrite(LEDWIFI, HIGH); // Encender LED
+    Serial.println("LittleFS inicializado correctamente");
   }
 }
 
-
-
-
-
-/*--------CONTADOR DE UNIDADES----------*/
-void IRAM_ATTR countInterrupt() {
-  count++;   // Incrementar el contador cada vez que se detecte un cambio en el pin de entrada
-}
-
-
-/*--------ALMACENAMIENTO FLASH----------*/
+// Muestra el espacio utilizado y libre en LittleFS
 void displayLittleFSSpace() {
-
-  //prueba para ver espacio : inicio
-  Serial.print("     Almacenamiento flash total (bytes): ");
+  Serial.print("Almacenamiento flash total: ");
   Serial.println(ESP.getFlashChipSize());
-  Serial.print("     Almacenamiento flash usado (bytes): ");
+  Serial.print("Almacenamiento flash usado: ");
   Serial.println(ESP.getSketchSize());
 
-  Serial.print("     Espacio total en LittleFS: ");
+  Serial.print("Espacio total BD: ");
   Serial.print(LittleFS.totalBytes() / (1024.0 * 1024.0));
   Serial.println(" MB");
 
-  Serial.print("     Espacio usado en LittleFS: ");
+  Serial.print("Espacio usado en BD: ");
   Serial.print(LittleFS.usedBytes() / (1024.0 * 1024.0));
   Serial.println(" MB");
 
-  //prueba : fin
-
-  
-  
-  // Calcular el porcentaje de espacio utilizado
   float percentageUsed = (float)LittleFS.usedBytes() / (float)LittleFS.totalBytes() * 100;
-
-  // Mostrar el porcentaje de espacio utilizado con dos decimales
-  Serial.print("\n     Espacio Usado de Memoria: ");
+  Serial.print("Espacio usado de memoria: ");
   Serial.printf("%.2f", percentageUsed);
   Serial.println(" %");
-
-}
-
-void initializeLittleFS() {
-
-if (!LittleFS.begin()) {  //!  FORMATEAR MEMORIA QUINATR SIGNO LUEGO VOLVER A COLOCAR
-  Serial.println("\n     Error al Inicializar LittleFS, Formateando...");
-  if (LittleFS.format()) {
-    Serial.println("\n     Formateo de LittleFS Completado");
-  } else {
-    Serial.println("\n     Error al Formatear LittleFS");
-    return;
-  }
-  if (!LittleFS.begin()) {
-    Serial.println("\n     Error al Inicializar LittleFS Después de Formatear");
-    return;
-  }
-} else {
-  Serial.println("\n     LittleFS Inicializado Correctamente"); // Agrega este mensaje de éxito
-}
-}
-
-void ensureFileExists() {
-  if (!LittleFS.exists("/data.txt")) {
-    File file = LittleFS.open("/data.txt", "a");  //w
-    if (!file) {
-      Serial.println("\n     Error al Crear el Archivo data.txt");
-    } else {
-      Serial.println("\n     Archivo data.txt Creado Exitosamente");
-      file.close();
-    }
-  } else {
-    Serial.println("\n     Se Encontro el Archivo data.txt ");
-  }
-}
-
-void appendDataToFile(const String &data) {
-  File file = LittleFS.open("/data.txt", "a");
-  if (!file) {
-    DEBUG_PRINT("\nError al abrir el archivo para escritura");
-  } else {
-    file.println(data);
-    file.close();
-    DEBUG_PRINT("\nArchivo guardado correctamente en memoria");
-  }
-}
-
-/*LEE CONTENIDO DE DATA.TEXT
-void readAllDataFromFile() {
-  File file = LittleFS.open("/data.txt", "r");
-  if (!file) {
-    DEBUG_PRINT("\n     Error al abrir el archivo para lectura");
-  } else {
-    DEBUG_PRINT("\n     Archivo abierto correctamente");
-    while (file.available()) {
-      Serial.write(file.read());
-    }
-    file.close();
-  }
-}
-*/
-
-void copyFileExceptSentLine(const String &sentLine) {
-  File sourceFile = LittleFS.open("/data.txt", "r");
-  File tempFile = LittleFS.open("/temp.txt", "w");
-
-  if (!sourceFile || !tempFile) {
-    DEBUG_PRINT("\n     Error al abrir archivos para actualizar datos no enviados");
-    return;
-  }
-
-  String line;
-  while (sourceFile.available()) {
-    line = sourceFile.readStringUntil('\n');
-    if (line != sentLine) {
-      tempFile.println(line);
-    }
-  }
-
-  sourceFile.close();
-  tempFile.close();
-
-}
-
-void replaceOriginalFileWithTemp() {
-  if (LittleFS.remove("/data.txt")) {
-    if (LittleFS.rename("/temp.txt", "/data.txt")) {
-      DEBUG_PRINT("\nArchivo de LittleFS actualizado correctamente");
-    } else {
-      DEBUG_PRINT("\nError al renombrar el archivo temporal");
-    }
-  } else {
-    DEBUG_PRINT("\nError al eliminar el archivo original de LittleFS");
-  }
-}
-
-void sendDataFromLittleFS() {
-
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
-  
-  File file = LittleFS.open("/data.txt", "r"); 
-  if (!file) {
-    DEBUG_PRINT("\n\n\n\nError al intentar enviar desde LittleFS nose pudo abrir el archivo data.text para lectura");
-   // file.close(); // Cierra el archivo
-  } else {
-    if (file.available()) { // Verifica si hay datos en el archivo
-      String line; // Variable para almacenar cada línea leída
-      while (file.available()) { // Mientras haya datos en el archivo
-        line = file.readStringUntil('\n'); // Lee una línea hasta el carácter de nueva línea
-        DEBUG_PRINT("\n\n\n\nAbriendo dato almacenado desde LittleFS");
-        //DEBUG_PRINTLN(line);
-
-        file.close(); // Cierra el archivo
-
-        //HTTP POST
-        http.begin(url_api);
-        http.addHeader("Content-Type", "application/json"); 
-
-        int responseCode = http.POST(line);
-
-        if (responseCode < 0) {
-          DEBUG_PRINT("\n\nError al intentar enviar Post Request desde LittleFS ");
-          http.end();
-          return;
-        }
-
-        if (responseCode != 200) {
-          DEBUG_PRINT("\n\nError en response al intentar enviar desde LittleFS :  ");
-          DEBUG_PRINTLN(responseCode);
-          http.end();
-          return;
-        }
-
-        if (responseCode == 200) {
-          String responseBody = http.getString();
-
-          DEBUG_PRINT("\n\nDatos enviados desde LittleFS :  ");
-          DEBUG_PRINTLN(line);
-
-          http.end();
-
-          // Copia el contenido del archivo original a un archivo temporal
-          // excepto la línea enviada
-          copyFileExceptSentLine(line);
-          // Reemplaza el archivo original con el archivo temporal
-          replaceOriginalFileWithTemp();
-        }
-    
-        // Abre el archivo nuevamente para la siguiente lectura
-        file = LittleFS.open("/data.txt", "r");
-      }
-      file.close(); 
-    } else {
-      file.close(); 
-      DEBUG_PRINT("\nNo hay datos para enviar desde LittleFS");
-    }
-  }
-}
-
-
-
-/*--------PRUEBA - RELE CONTADOR ACTIVACIONES CADA X TIEMPO ----------*/
-int count_prueba = 0; // Declarar una variable de contador
-
-
-
-
-void setup()
-{
-
- Serial.begin(115200);
- 
- configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-
- Wire.begin(SDA_PIN, SCL_PIN);//iniciando I2C
-
-   int attempts = 0;
-  while (!rtc_ds3231.begin() && attempts < MAX_ATTEMPTS) {
-    attempts++;
-    Serial.println("\n\n Intentando iniciar el modulo DS3231");
-    delay(1000);
-   }
-  
-  if (attempts == MAX_ATTEMPTS) {
-    Serial.println("\n\n No se pudo encontrar el modulo DS3231 valido");
-    updateLedStatusRTC(); //alarma si no se logra actualizar datos de servidor ntp
-     //deberia activarse la alarma updateLedStatusRTC() por que no detectaria el año valido
-  }
-
-
-
- WiFi.setHostname(codDevice);
-
-
- 
-
- queue = xQueueCreate(100, sizeof(InputInfo));  //Cola
-
- 
- Serial.print("\n\n\n     Host: ");
- Serial.println(WiFi.getHostname());
-
- initializeLittleFS();
- ensureFileExists();
- displayLittleFSSpace();
-
-
- pinMode(IN1, INPUT);
- pinMode(IN2, INPUT);
- pinMode(IN3, INPUT);
- pinMode(IN4, INPUT);
- pinMode(IN5, INPUT);
- pinMode(IN6, INPUT);
- pinMode(IN7, INPUT);
- pinMode(IN8, INPUT);
- pinMode(IN9, INPUT);
- 
-
-
- pinMode(RL1, OUTPUT);
- digitalWrite(RL1, LOW);
- pinMode(RL2, OUTPUT);
- digitalWrite(RL2, LOW);
- pinMode(RL3, OUTPUT);
- digitalWrite(RL3, LOW);
-
-
- pinMode(LEDWIFI, OUTPUT);
- digitalWrite(LEDWIFI, LOW);
- pinMode(LEDRTC, OUTPUT);
- digitalWrite(LEDRTC, LOW);
-
-
- attachInterrupt(digitalPinToInterrupt(IN10), countInterrupt, FALLING);  // Establece interrupción en el pin de entrada 10
- 
-
-
-/*--------DETECCION DE PERDIDA DE ENERGIA DEL DS3231----------*/
- if (rtc_ds3231.lostPower()) {  //detecta perdida de energia en el modulo DS3231
-    digitalWrite(LEDRTC, HIGH);
-    ledStatus = true; // Cambia el estado del LED
-  }
-
-
-
-
-  
- debouncer1.attach(IN1);
- debouncer1.interval(1000); // intervalo en ms  //Dar 1 seg para q no detecte join stoll
-
- debouncer2.attach(IN2);
- debouncer2.interval(1000); // intervalo en ms
-
- debouncer3.attach(IN3);
- debouncer3.interval(1000); // intervalo en ms
- 
- debouncer4.attach(IN4);
- debouncer4.interval(600); // intervalo en ms
- 
- debouncer5.attach(IN5);
- debouncer5.interval(600); // intervalo en ms
- 
- debouncer6.attach(IN6);
- debouncer6.interval(1000); // intervalo en ms   //aumentar si es preciso ya que da muchos activaciones caida de tela
- 
- debouncer7.attach(IN7);
- debouncer7.interval(600); // intervalo en ms
- 
- debouncer8.attach(IN8);
- debouncer8.interval(600); // intervalo en ms
- 
- debouncer9.attach(IN9);
- debouncer9.interval(600); // intervalo en ms
-
-
- // Comprueba y registra el estado inicial de las entradas digitales
- debouncer1.update();
- if (debouncer1.read() == HIGH) 
-   {
-   InputInfo initialInfo1 = {IN1, HIGH};
-   xQueueSend(queue, &initialInfo1, 0); //xQueueSend(queue, &initialInfo1, portMAX_DELAY);
-   }
- 
- debouncer2.update();
- if (debouncer2.read() == HIGH)
-   {
-   InputInfo initialInfo2 = {IN2, HIGH};
-   xQueueSend(queue, &initialInfo2, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
-   }
-
-   debouncer3.update();
- if (debouncer3.read() == HIGH) 
-   {
-   InputInfo initialInfo3 = {IN3, HIGH};
-   xQueueSend(queue, &initialInfo3, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
-   }
-
-   debouncer4.update();
- if (debouncer4.read() == LOW) 
-   {
-   InputInfo initialInfo4 = {IN4, LOW};
-   xQueueSend(queue, &initialInfo4, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
-   }
-
-   debouncer5.update();
- if (debouncer5.read() == LOW) 
-   {
-   InputInfo initialInfo5 = {IN5, LOW};
-   xQueueSend(queue, &initialInfo5, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
-   }
-
-   debouncer6.update();
- if (debouncer6.read() == LOW) 
-   {
-   InputInfo initialInfo6 = {IN6, LOW};
-   xQueueSend(queue, &initialInfo6, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
-   }
-
-   debouncer7.update();
- if (debouncer7.read() == LOW) 
-   {
-   InputInfo initialInfo7 = {IN7, LOW};
-   xQueueSend(queue, &initialInfo7, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
-   }
-
-   debouncer8.update();
- if (debouncer8.read() == LOW) 
-   {
-   InputInfo initialInfo8 = {IN8, LOW};
-   xQueueSend(queue, &initialInfo8, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
-   }
-
-   debouncer9.update();
- if (debouncer9.read() == LOW) 
-   {
-   InputInfo initialInfo9 = {IN9, LOW};
-   xQueueSend(queue, &initialInfo9, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
-   }
-
-
-
- xTaskCreatePinnedToCore(
-                   Task1code,
-                   "Task1",
-                   10000,
-                   NULL,
-                   1,
-                   NULL,
-                   0);
-
-
-
-
-
-Serial.print("\n     Servidor NTP : ");
-Serial.print(ntpServer);
-
-Serial.print("\n\n\n\n         Codigo de Depuracion : ");
-
-
-}
-
-
-
-void loop()
-{
-  reconnectWiFi();
-
-  updateLedStatusWifi();
-  updateReleStatusInput();
-
-
-
-
-  
-
-  if (!timeoutOver) // Si aún no ha pasado el tiempo de espera
-  {
-  if (WiFi.status() == WL_CONNECTED) 
-  { 
-    if (millis() - startTimeoutForNTP >= 15000)   
-    {
-      updateTimeDevice();
-    }
-  }
-  }
-  
-
-
-
-
-
-
-  /*--------ACTIVAR/DESACTIVAR DEPURACION----------*/
-
-  if (Serial.available()) {
-    
-    String cod = Serial.readStringUntil('\n'); // Lee la línea desde la interfaz serie
-
-    if (cod == DEBUG_CMD) {
-      debugEnabled = !debugEnabled;  // Cambia el estado de debugEnabled
-      Serial.println(debugEnabled ? "         DEPURACION HABILITADA" : "\n\n\n         DEPURACION DESHABILITADA");
-    }
-  }
-
-
-/*-------------------------ENVIAR ESTADOS A BD---------------------------*/      
-
-    InputInfo info;
-
-    if (uxQueueMessagesWaiting(queue) > 0) 
-{
-
-    if(xQueueReceive(queue, &info, 0))
- {
-
- /*-------------------------DIGITAL IMPUT 1---------------------------*/
-  if(info.pin == IN1)
-
-  {
-     static String  codStaticIN1 = "";
-
-        if(info.state == HIGH) 
-
-        {  codStaticIN1 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
- 
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = codMaquina,                  
-    json["CodParo"] = codParoIN1,                    
-    json["CodUnicoParo"] = codStaticIN1,          
-    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
-    json["FechaHoraFinParo"] = "",          
-    json["Rpm"] = 0,                                      
-
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-
-            //quitar inicio
-            /*
-       String responseCodeStr; // Esta será la representación de responseCode que insertaremos en el JSON
-
-    if (responseCode < 0) {
-        // Si el código de respuesta es negativo, lo convertimos a positivo y lo precedemos con 'N'
-        responseCodeStr = "N" + String(-responseCode);
-    } else {
-        // Si el código de respuesta es positivo, simplemente lo precedemos con 'P'
-        responseCodeStr = "P" + String(responseCode);
-    }
-
-    // Antes de guardar el JSON, modifica "Rpm" para que sea responseCodeStr en lugar de count
-    json["CodParo"] = responseCodeStr;
-    String modifiedJson = json.as<String>();
-    */
-    //quita fin
-
-
-
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
-    }
-      count = 0;
-  } 
-        
- else
-        
- {
-
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                              
-    json["CodMaquina"] = codMaquina,                 
-    json["CodParo"] = codParoIN1,                   
-    json["CodUnicoParo"] = codStaticIN1,          
-    json["FechaHoraIniParo"] = "",     
-    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
-    json["Rpm"] = count,                                      
-
-    //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-
-            //quitar inicio
-            /*
-       String responseCodeStr; // Esta será la representación de responseCode que insertaremos en el JSON
-
-    if (responseCode < 0) {
-        // Si el código de respuesta es negativo, lo convertimos a positivo y lo precedemos con 'N'
-        responseCodeStr = "N" + String(-responseCode);
-    } else {
-        // Si el código de respuesta es positivo, simplemente lo precedemos con 'P'
-        responseCodeStr = "P" + String(responseCode);
-    }
-
-    // Antes de guardar el JSON, modifica "Rpm" para que sea responseCodeStr en lugar de count
-    json["CodParo"] = responseCodeStr;
-    String modifiedJson = json.as<String>();
-    */
-    //quita fin
-
-
-
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-
-      }
-
-      codStaticIN1 = "";
-      count = 0;
-   
-    }
-     
-  }
-
-  
- /*-------------------------DIGITAL IMPUT 2---------------------------*/
-  
-  if(info.pin == IN2)
-
-  {
-     static String  codStaticIN2 = "";
-
-        if(info.state == HIGH) 
-
-        {  codStaticIN2 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
- 
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = codMaquina,                  
-    json["CodParo"] = codParoIN2,                    
-    json["CodUnicoParo"] = codStaticIN2,          
-    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
-    json["FechaHoraFinParo"] = "",          
-    json["Rpm"] = 0,                                      
-
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
-    }
-     
-  } 
-        
- else
-        
- {
-
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                              
-    json["CodMaquina"] = codMaquina,                 
-    json["CodParo"] = codParoIN2,                   
-    json["CodUnicoParo"] = codStaticIN2,          
-    json["FechaHoraIniParo"] = "",     
-    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
-    json["Rpm"] = 0,                                      
-
-    //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-
-      }
-
-      codStaticIN2 = "";
-   
-    }
-     
-  }
- 
-  
-
- /*-------------------------DIGITAL IMPUT 3---------------------------*/
-
-  if(info.pin == IN3)
-
-  {
-     static String  codStaticIN3 = "";
-
-        if(info.state == HIGH) 
-
-        {  codStaticIN3 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
- 
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = codMaquina,                  
-    json["CodParo"] = codParoIN3,                    
-    json["CodUnicoParo"] = codStaticIN3,          
-    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
-    json["FechaHoraFinParo"] = "",          
-    json["Rpm"] = 0,                                      
-
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
-    }
-     
-  } 
-        
- else
-        
- {
-
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                              
-    json["CodMaquina"] = codMaquina,                 
-    json["CodParo"] = codParoIN3,                   
-    json["CodUnicoParo"] = codStaticIN3,          
-    json["FechaHoraIniParo"] = "",     
-    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
-    json["Rpm"] = 0,                                      
-
-    //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-
-      }
-
-      codStaticIN3 = "";
-   
-    }
-     
-  }
- 
-  
-
- /*-------------------------DIGITAL IMPUT 4---------------------------*/
- /*NO ACTIVO EN J2
-  if(info.pin == IN4)
-
-  {
-     static String  codStaticIN4 = "";
-
-        if(info.state == LOW) 
-
-        {  codStaticIN4 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
- 
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = codMaquina,                  
-    json["CodParo"] = codParoIN4,                    
-    json["CodUnicoParo"] = codStaticIN4,          
-    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
-    json["FechaHoraFinParo"] = "",          
-    json["Rpm"] = 0,                                      
-
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
-    }
-     
-  } 
-        
- else
-        
- {
-
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                              
-    json["CodMaquina"] = codMaquina,                 
-    json["CodParo"] = codParoIN4,                   
-    json["CodUnicoParo"] = codStaticIN4,          
-    json["FechaHoraIniParo"] = "",     
-    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
-    json["Rpm"] = 0,                                      
-
-    //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-
-      }
-
-      codStaticIN4 = "";
-   
-    }
-     
-  }
-*/
-  
-
- /*-------------------------DIGITAL IMPUT 5---------------------------*/
- /*DESACTIVADO SOLO PARA PRUEBA DE MATSUYA (ACTIVAR PARA J2)
-  if(info.pin == IN5)
-
-  {
-     static String  codStaticIN5 = "";
-
-        if(info.state == LOW) 
-
-        {  codStaticIN5 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
- 
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = codMaquina,                  
-    json["CodParo"] = codParoIN5,                    
-    json["CodUnicoParo"] = codStaticIN5,          
-    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
-    json["FechaHoraFinParo"] = "",          
-    json["Rpm"] = 0,                                      
-
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
-    }
-     
-  } 
-        
- else
-        
- {
-
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                              
-    json["CodMaquina"] = codMaquina,                 
-    json["CodParo"] = codParoIN5,                   
-    json["CodUnicoParo"] = codStaticIN5,          
-    json["FechaHoraIniParo"] = "",     
-    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
-    json["Rpm"] = 0,                                      
-
-    //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-
-      }
-
-      codStaticIN5 = "";
-   
-    }
-     
-  }
- */
-  
-
- /*-------------------------DIGITAL IMPUT 6---------------------------*/
- /*DESACTIVADO SOLO PARA PRUEBA DE MATSUYA (ACTIVAR PARA J2)
-  if(info.pin == IN6)
-
-  {
-     static String  codStaticIN6 = "";
-
-        if(info.state == LOW) 
-
-        {  codStaticIN6 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
- 
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = codMaquina,                  
-    json["CodParo"] = codParoIN6,                    
-    json["CodUnicoParo"] = codStaticIN6,          
-    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
-    json["FechaHoraFinParo"] = "",          
-    json["Rpm"] = 0,                                      
-
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
-    }
-     
-  } 
-        
- else
-        
- {
-
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                              
-    json["CodMaquina"] = codMaquina,                 
-    json["CodParo"] = codParoIN6,                   
-    json["CodUnicoParo"] = codStaticIN6,          
-    json["FechaHoraIniParo"] = "",     
-    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
-    json["Rpm"] = 0,                                      
-
-    //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-
-      }
-
-      codStaticIN6 = "";
-   
-    }
-     
-  }
- */
-  
-
- /*-------------------------DIGITAL IMPUT 7---------------------------*/
- /* NO ACTIVO EN   J2
-  if(info.pin == IN7)
-
-  {
-     static String  codStaticIN7 = "";
-
-        if(info.state == LOW) 
-
-        {  codStaticIN7 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
- 
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = codMaquina,                  
-    json["CodParo"] = codParoIN7,                    
-    json["CodUnicoParo"] = codStaticIN7,          
-    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
-    json["FechaHoraFinParo"] = "",          
-    json["Rpm"] = 0,                                      
-
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
-    }
-     
-  } 
-        
- else
-        
- {
-
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                              
-    json["CodMaquina"] = codMaquina,                 
-    json["CodParo"] = codParoIN7,                   
-    json["CodUnicoParo"] = codStaticIN7,          
-    json["FechaHoraIniParo"] = "",     
-    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
-    json["Rpm"] = 0,                                      
-
-    //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-
-      }
-
-      codStaticIN7 = "";
-   
-    }
-     
-  }
-*/
-  
-
- /*-------------------------DIGITAL IMPUT 8---------------------------*/
-/*DESACTIVADO SOLO PARA PRUEBA DE MATSUYA (ACTIVAR PARA J2)
-  if(info.pin == IN8)
-
-  {
-     static String  codStaticIN8 = "";
-
-        if(info.state == LOW) 
-
-        {  codStaticIN8 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
- 
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = codMaquina,                  
-    json["CodParo"] = codParoIN8,                    
-    json["CodUnicoParo"] = codStaticIN8,          
-    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
-    json["FechaHoraFinParo"] = "",          
-    json["Rpm"] = 0,                                      
-
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
-    }
-     
-  } 
-        
- else
-        
- {
-
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                              
-    json["CodMaquina"] = codMaquina,                 
-    json["CodParo"] = codParoIN8,                   
-    json["CodUnicoParo"] = codStaticIN8,          
-    json["FechaHoraIniParo"] = "",     
-    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
-    json["Rpm"] = 0,                                      
-
-    //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-
-      }
-
-      codStaticIN8 = "";
-   
-    }
-     
-  }
- */
-  
-
- /*-------------------------DIGITAL IMPUT 9---------------------------*/
- /*NO ACTIVO EN J2
-  if(info.pin == IN9)
-
-  {
-     static String  codStaticIN9 = "";
-
-        if(info.state == LOW) 
-
-        {  codStaticIN9 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
- 
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = codMaquina,                  
-    json["CodParo"] = codParoIN9,                    
-    json["CodUnicoParo"] = codStaticIN9,          
-    json["FechaHoraIniParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),         
-    json["FechaHoraFinParo"] = "",          
-    json["Rpm"] = 0,                                      
-
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
-    }
-     
-  } 
-        
- else
-        
- {
-
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                              
-    json["CodMaquina"] = codMaquina,                 
-    json["CodParo"] = codParoIN9,                   
-    json["CodUnicoParo"] = codStaticIN9,          
-    json["FechaHoraIniParo"] = "",     
-    json["FechaHoraFinParo"] = getDateTimeDS3231(),   //rtc_esp32.getTime("%FT%T"),            
-    json["Rpm"] = 0,                                      
-
-    //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
-
-   int responseCode = http.POST(json.as<String>());
-
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request");
-    http.end();
-   }
-
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
-   }
-
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-
-      }
-
-      codStaticIN9 = "";
-   
-    }
-     
-  }
-*/
-
-
-
-
-
-
-  }
-
-}
-
-
-
-
-/*-------------------------SE EJECUTA CADA X INTERVALO DE TIEMPO PARA ENVIAR DESDE LITTLEFS---------------------------*/  
- unsigned long currentTime1 = millis();
-  if (currentTime1 - previousTime1 >= interval1) 
-  {  previousTime1 = currentTime1;
-   sendDataFromLittleFS(); 
-  }
-
-
-
-
-
-
-/*--------SERIALS PRINTS PARA MOSTARA EN CONSOLA----------*/
-/*
-  
-  Serial.print("Dirección IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("Máscara de subred: ");
-  Serial.println(WiFi.subnetMask());
-  Serial.print("Puerta de enlace: ");
-  Serial.println(WiFi.gatewayIP());
-  Serial.print("Dirección IP del servidor DNS 1: ");
-  Serial.println(WiFi.dnsIP(0));
-  Serial.print("Dirección IP del servidor DNS 2: ");
-  Serial.println(WiFi.dnsIP(1));
-
-  Serial.print("Intensidad de la señal Wi-Fi (RSSI): ");
-  Serial.print(WiFi.RSSI());
-  Serial.println(" dBm");
-
-  Serial.print("\n\n\nEnviando JSON.......");
-  Serial.println(json.as<String>());
-
-  Serial.print("\n         Tiempo Servidor NTP  -> ");
-  Serial.print(rtc_esp32.getTime("%Y%m%d%H%M%S"));
 
   size_t freeHeap = ESP.getFreeHeap();
   Serial.print("Memoria libre: ");
   Serial.print(freeHeap);
   Serial.println(" bytes");
-  
+
   Serial.print("Velocidad del procesador: ");
   Serial.print(ESP.getCpuFreqMHz());
   Serial.println(" MHz");
+}
 
-  Serial.print("Almacenamiento flash total (bytes): ");
-  Serial.println(ESP.getFlashChipSize());
-  Serial.print("Almacenamiento flash usado (bytes): ");
-  Serial.println(ESP.getSketchSize());
+// Carga la temperatura configurada desde un archivo JSON en LittleFS
+void loadSetTemperature() {
+  if (!LittleFS.exists("/setTemp.json")) {
+    Serial.println("El archivo setTemp.json no existe");
+    return;
+  }
+  File file = LittleFS.open("/setTemp.json", "r");
+  if (!file) {
+    Serial.println("Error al abrir setTemp.json para lectura");
+    return;
+  }
+  DynamicJsonDocument doc(1024);
+  DeserializationError error = deserializeJson(doc, file);
+  if (error) {
+    Serial.print("Error al deserializar JSON: ");
+    Serial.println(error.c_str());
+  } else {
+    setTemperature = doc["setTemperature"].as<float>();
+  }
+  file.close();
+}
 
-  Serial.print("Espacio total en LittleFS: ");
-  Serial.print(LittleFS.totalBytes() / (1024.0 * 1024.0));
-  Serial.println(" MB");
+// Guarda la temperatura configurada en un archivo JSON en LittleFS
+void saveSetTemperature() {
+  File file = LittleFS.open("/setTemp.json", "w");
+  if (!file) {
+    Serial.println("Error al abrir setTemp.json para escritura");
+    return;
+  }
+  DynamicJsonDocument doc(1024);
+  doc["setTemperature"] = setTemperature;
+  if (serializeJson(doc, file) == 0) {
+    Serial.println("Error al escribir JSON en setTemp.json");
+  }
+  file.close();
+}
 
-  Serial.print("Espacio usado en LittleFS: ");
-  Serial.print(LittleFS.usedBytes() / (1024.0 * 1024.0));
-  Serial.println(" MB");
+/*-------------------------- Funciones de SQLite3 --------------------------*/
 
-  Serial.print("Espacio libre en LittleFS: ");
-  Serial.print((LittleFS.totalBytes() - LittleFS.usedBytes()) / (1024.0 * 1024.0));
-  Serial.println(" MB");
+// Callback para mostrar resultados de una consulta SQL en la consola serial
+static int callback(void *data, int argc, char **argv, char **azColName) {
+  Serial.printf("%s: ", (const char *)data);
+  for (int i = 0; i < argc; i++) {
+    Serial.printf("%s = %s\n", azColName[i], argv[i] ? argv[i] : "NULL");
+  }
+  Serial.printf("\n");
+  return 0;
+}
+
+// Ejecuta una consulta SQL en la base de datos SQLite
+int db_exec(sqlite3 *db, const char *sql) {
+  Serial.println(sql);
+  long start = micros();
+  int rc = sqlite3_exec(db, sql, NULL, 0, &zErrMsg);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error SQL: %s\n", zErrMsg);
+    sqlite3_free(zErrMsg);
+  } else {
+    Serial.printf("Operación realizada exitosamente\n");
+  }
+  Serial.print("Tiempo transcurrido: ");
+  Serial.println(micros() - start);
+  return rc;
+}
+
+// Abre una base de datos SQLite y configura el modo WAL
+int openDb(const char *filename, sqlite3 **db) {
+  int rc = sqlite3_open(filename, db);
+  if (rc) {
+    Serial.printf("No se puede abrir la base de datos: %s\n", sqlite3_errmsg(*db));
+    return rc;
+  } else {
+    Serial.printf("Base de datos abierta exitosamente: %s\n", filename);
+    db_exec(*db, "PRAGMA journal_mode = WAL;");
+  }
+  return rc;
+}
+
+// Obtiene el valor máximo de ID en la tabla tempData
+int getMaxId() {
+  const char *sqlMaxId = "SELECT MAX(id) FROM tempData;";
+  sqlite3_stmt *stmt;
+  int maxId = 0;
+
+  if (sqlite3_prepare_v2(db, sqlMaxId, -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+      maxId = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+  } else {
+    Serial.println("Error al obtener el valor máximo de id.");
+  }
+  return maxId;
+}
+
+// Crea la tabla tempData si no existe
+void createTable() {
+  const char* sqlCreateTable = "CREATE TABLE IF NOT EXISTS tempData ("
+                               "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                               "timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                               "temperature REAL);";
   
+  if (db_exec(db, sqlCreateTable) == SQLITE_OK) {
+    Serial.println("Tabla creada o existente: tempData");
+  } else {
+    Serial.println("Error al crear la tabla tempData.");
+  }
+}
 
-*/
-
-
-
-
-  /*--------PRUEBA - RELE CONTADOR ACTIVACIONES CADA X TIEMPO ----------*/
-/*
- if (count_prueba < 300) {    //Numero de activaciones 
-  static unsigned long previousMillis = 0;
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= 500) {   //Tiempo de duracion de cada activacion
-    previousMillis = currentMillis;
-    digitalWrite(RL3, !digitalRead(RL3));
-     count_prueba++;}
- }
-
-*/
-
-
-
-
-
-
-/*--------PRUEBA - ENVIO DE CREDENCIALES WIFI POST ----------*/
-/*
- unsigned long currentTime2 = millis();
-  if (currentTime2 - previousTime2 >= interval2) 
-  {  previousTime2 = currentTime2;
-
-    if (WiFi.status() != WL_CONNECTED) {
+// Inserta un nuevo registro en la tabla db_list de la base de datos central
+void insertNewDatabase(String dbName, String path) {
+  sqlite3 *centralDb;
+  
+  // Abrir la base de datos central
+  if (sqlite3_open("/sd/central.db", &centralDb)) {
+    Serial.println("Error al abrir la base de datos central");
     return;
   }
 
-  
-  //JSON  A ENVIAR POR POST
-    json.clear();                                                        
-    json["CodMaquina"] = wifi_ssid,                  
-    json["CodParo"] = wifi_password,                    
-    json["CodUnicoParo"] = local_IP,          
-    json["FechaHoraIniParo"] = "",         
-    json["FechaHoraFinParo"] = "",            
-    json["Rpm"] = timeupdatewifi,                                      
+  // Crear la tabla db_list si no existe
+  const char* sqlCreateDbListTable = "CREATE TABLE IF NOT EXISTS db_list ("
+                                     "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                                     "name TEXT, "
+                                     "path TEXT);";
+  db_exec(centralDb, sqlCreateDbListTable);
 
-   //HTTP POST
-   http.begin(url_api);   
-   http.addHeader("Content-Type", "application/json"); 
+  // Insertar el nombre y la ruta de la nueva base de datos en la tabla db_list
+  String sql = "INSERT INTO db_list (name, path) VALUES ('" + dbName + "', '" + path + "');";
+  char *zErrMsg = 0;
+  int rc = sqlite3_exec(centralDb, sql.c_str(), NULL, 0, &zErrMsg);
+  if (rc != SQLITE_OK) {
+    Serial.print("Error al insertar la nueva base de datos en db_list: ");
+    Serial.println(zErrMsg);
+    sqlite3_free(zErrMsg);  // Liberar la memoria asignada para el mensaje de error
+  }
 
-   int responseCode = http.POST(json.as<String>());
+  // Cerrar la base de datos central
+  sqlite3_close(centralDb);
+}
 
-   if (responseCode < 0)
-   {
-    DEBUG_PRINT("\n\n         Error al intentar enviar Post Request wifi");
-    http.end();
-   }
+// Función para obtener el nombre de la última base de datos desde la tabla db_list
+String getLastDatabaseName() {
+  sqlite3 *centralDb;
+  String lastDbPath;
 
-   if (responseCode != 200)
-   {
-    DEBUG_PRINT("\n\n         Error en response al intentar enviar credenciales wifi:  ");
-    DEBUG_PRINTLN(responseCode);
-    http.end();
-    //appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
+  // Abrir la base de datos central
+  if (sqlite3_open("/sd/central.db", &centralDb)) {
+    Serial.println("Error al abrir la base de datos central");
+    return lastDbPath;
+  }
 
-   }
+  // Consulta para obtener el nombre y la ruta de la última base de datos
+  const char *sqlLastDb = "SELECT path FROM db_list ORDER BY id DESC LIMIT 1;";
+  sqlite3_stmt *stmt;
 
-   if (responseCode == 200)
-   {
-    String responseBody = http.getString();
-    DEBUG_PRINT("\n\nDatos wifi enviados :  ");
-    DEBUG_PRINTLN(json.as<String>());
- 
-    //deserializeJson(apiResponse, responseBody);    //deserializa una cadena JSON
-    //delay(2000);
-    //String codigoresponse = apiResponse["codUnicoParo"]; // retorna  por (codigoresponse)  el {"CodUnicoParo":"20230322085824"}
-    //Serial.println(codigoresponse);
-    //Serial.println(responseBody);"
-
-    http.end();
-    
-
+  if (sqlite3_prepare_v2(centralDb, sqlLastDb, -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+      lastDbPath = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
     }
+    sqlite3_finalize(stmt);
+  } else {
+    Serial.println("Error al obtener el nombre de la última base de datos.");
+  }
+
+  // Cerrar la base de datos central
+  sqlite3_close(centralDb);
+
+  return lastDbPath;
+}
 
 
 
- }
- 
- */
+// Definición de la función createDatabaseAndTable
+void createDatabaseAndTable() {
+  // Generar nombre para la nueva base de datos
+  String newDbName = "tempDB_" + rtc_esp32.getTime("%Y%m%d_%H%M%S") + ".db";
+  String newDbPath = "/sd/" + newDbName;
+
+  // Cerrar la base de datos actual si está abierta
+  if (db) {
+    sqlite3_close(db);
+    Serial.println("Base de datos anterior cerrada.");
+  }
+  
+  // Crear la nueva base de datos
+  if (openDb(newDbPath.c_str(), &db) == SQLITE_OK) {
+    Serial.print("Nueva base de datos creada: ");
+    Serial.println(newDbName);
+
+    // Registrar el nombre de la base de datos en la base de datos central
+    insertNewDatabase(newDbName, newDbPath);
+
+    // Crear la tabla en la nueva base de datos
+    createTable();
+  } else {
+    Serial.println("Error al crear la nueva base de datos.");
+  }
+}
 
 
 
-//QUITAR
-    //Serial.print("\nIntensidad de la señal Wi-Fi (RSSI): ");
-    //Serial.print(WiFi.RSSI());
-    //Serial.println(" dBm");
-    //delay(1000);
+// Función para crear una nueva base de datos o abrir la última utilizada
+void createOrOpenDatabase() {
+  // Obtener el nombre de la última base de datos
+  String lastDbPath = getLastDatabaseName();
+
+  if (!lastDbPath.isEmpty()) {
+    // Intentar abrir la última base de datos
+    if (openDb(lastDbPath.c_str(), &db) == SQLITE_OK) {
+      Serial.print("Base de datos abierta: ");
+      Serial.println(lastDbPath);
+
+      // Crear la tabla si no existe
+      createTable();
+    } else {
+      Serial.println("Error al abrir la última base de datos. Creando nueva base de datos.");
+      createDatabaseAndTable();  // Llamada a la función declarada
+    }
+  } else {
+    // Si no se pudo obtener el nombre, crear una nueva base de datos
+    createDatabaseAndTable();  // Llamada a la función declarada
+  }
+}
 
 
+// Inserta un registro de temperatura en la tabla tempData
+void insertData(float temperature) {
+  char sqlInsert[128];
+  sprintf(sqlInsert, "INSERT INTO tempData (temperature) VALUES (%f);", temperature);
+  
+  if (db_exec(db, sqlInsert) == SQLITE_OK) {
+    Serial.print("Valor de tempMachine insertado en tempData: ");
+    Serial.println(temperature);
+    Serial.print("Timestamp: ");
+    Serial.println(rtc_esp32.getTime("%A, %B %d %Y %H:%M:%S"));
+  }
+  
+  // Verificar si se alcanzó el límite de registros
+  if (getMaxId() >= tableRecordLimit) {
+    Serial.println("Límite de registros alcanzado. Creando nueva base de datos y tabla.");
+    createDatabaseAndTable();
+  }
+}
 
+// Borra todos los registros de la tabla TempData
+void deleteAllData() {
+  const char *sqlDelete = "DELETE FROM tempData;";
+  db_exec(db, sqlDelete);
+  Serial.println("Todos los datos eliminados de tempData");
+}
 
+/*-------------------------- Funciones de ElegantOTA --------------------------*/
+
+// Maneja el inicio de la actualización OTA
+void onOTAStart() {
+  Serial.println("¡Comenzó la actualización OTA!");
+}
+
+// Muestra el progreso de la actualización OTA
+void onOTAProgress(size_t current, size_t final) {
+  if (millis() - ota_progress_millis > 1000) {
+    ota_progress_millis = millis();
+    Serial.printf("Progreso de OTA: %u bytes, Final: %u bytes\n", current, final);
+  }
+}
+
+// Maneja el fin de la actualización OTA
+void onOTAEnd(bool success) {
+  if (success) {
+    Serial.println("¡La actualización OTA finalizó exitosamente!");
+  } else {
+    Serial.println("¡Hubo un error durante la actualización OTA!");
+  }
+}
+
+/*-------------------------- Funciones de Control y Utilidad --------------------------*/
+
+// Actualiza el estado del LED según la conexión WiFi
+void updateLedStatusWifi() {
+  if (WiFi.status() != WL_CONNECTED) {
+    digitalWrite(ledWifiOutput, LOW);  // Apagar LED
+  } else {
+    digitalWrite(ledWifiOutput, HIGH); // Encender LED
+  }
+}
+
+// Devuelve la temperatura de la máquina como cadena de texto
+String readTempMachine() {
+  return String(tempMachine);
+}
+
+// Devuelve la temperatura configurada como cadena de texto
+String readsetTempAlarm() {
+  return String(setTemperature);
+}
+
+/*-------------------------- Función para eliminar todas las bases de datos --------------------------*/
+
+void deleteAllDatabases() {
+  File root = SD.open("/");
+  if (!root) {
+    Serial.println("Error al abrir el directorio raíz de la tarjeta SD");
+    return;
+  }
+
+  if (!root.isDirectory()) {
+    Serial.println("La raíz de la tarjeta SD no es un directorio");
+    return;
+  }
+
+  File file = root.openNextFile();
+  while (file) {
+    String fileName = file.name();
+    if (fileName.endsWith(".db")) { // Solo eliminar archivos con extensión .db
+      Serial.print("Eliminando base de datos: ");
+      Serial.println(fileName);
+
+      // Asegurarse de que el archivo se cierre antes de eliminarlo
+      file.close();
+
+      // Intentar eliminar el archivo
+      if (SD.remove(fileName)) {
+        Serial.println("Archivo eliminado exitosamente");
+      } else {
+        Serial.println("Error al eliminar el archivo");
+      }
+    }
+    file = root.openNextFile();
+  }
+}
+
+/*--------------------------------- Configuración Inicial en setup() ---------------------------------*/
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  esp_task_wdt_init(30, true);
+  esp_task_wdt_add(NULL);
+
+  WiFi.mode(WIFI_STA);
+  reconnectWiFi();
+  runSetupServerNTP();
+
+  ElegantOTA.setAuth("admin", "admin");
+  ElegantOTA.begin(&server);
+  ElegantOTA.onStart(onOTAStart);
+  ElegantOTA.onProgress(onOTAProgress);
+  ElegantOTA.onEnd(onOTAEnd);
+
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(LittleFS, "/index.html", "text/html");
+  });
+
+  server.on("/tempMachine", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/plain", readTempMachine().c_str());
+  });
+
+  server.on("/setTemp", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("value", true)) {
+      setTemperature = request->getParam("value", true)->value().toFloat();
+      saveSetTemperature();
+      request->send(200, "text/plain", "Set temperature updated");
+    } else {
+      request->send(400, "text/plain", "Bad Request");
+    }
+  });
+
+  server.on("/setTempAlarm", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/plain", readsetTempAlarm().c_str());
+  });
+
+  server.on("/database", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SD, "/temperature.db", "application/octet-stream");        
+  });
+
+  server.on("/deleteAllData", HTTP_GET, [](AsyncWebServerRequest *request) {
+    deleteAllData();
+    request->send(200, "text/plain", "All data deleted");
+  });
+
+  server.on("/deleteAllDatabases", HTTP_GET, [](AsyncWebServerRequest *request) {
+    deleteAllDatabases();
+    request->send(200, "text/plain", "Todas las bases de datos han sido eliminadas.");
+  });
+
+  server.serveStatic("/", SD, "/");
+  server.serveStatic("/", LittleFS, "/").setCacheControl("max-age=600");
+  server.begin();
+  Serial.println("Servidor HTTP iniciado");
+
+  initializeLittleFS();
+  displayLittleFSSpace();
+  loadSetTemperature();
+
+  pinMode(ledWifiOutput, OUTPUT);
+  digitalWrite(ledWifiOutput, LOW);
+
+  pinMode(relay1_Alarm, OUTPUT);
+  digitalWrite(relay1_Alarm, HIGH);
+
+  SPI.begin(12, 13, 11, 10);
+  if (!SD.begin(10)) {
+    Serial.println("Error al inicializar la tarjeta SD");
+    return;
+  }
+  sqlite3_initialize();
+
+  // Modificación: Intentar abrir la última base de datos o crear una nueva
+  createOrOpenDatabase();
+}
+
+/*--------------------------------- Bucle Principal en loop() ---------------------------------*/
+
+void loop() {
+  reconnectWiFi();
+  updateLedStatusWifi();
+  ElegantOTA.loop();
+
+  tempMachine = round((25.0 + ((float)rand() / RAND_MAX) * 5.0) * 100.0) / 100.0;
+
+  if (tempMachine >= setTemperature) {
+    digitalWrite(relay1_Alarm, LOW); // Activar alarma
+  } else {
+    digitalWrite(relay1_Alarm, HIGH); // Desactivar alarma
+  }
+
+  unsigned long currentTime2 = millis();
+  if (currentTime2 - previousTime2 >= interval2) {
+    previousTime2 = currentTime2;
+
+    if (WiFi.status() == WL_CONNECTED) {
+      insertData(tempMachine);
+      Serial.println(rtc_esp32.getTime("%A, %B %d %Y %H:%M:%S"));  // Imprime la hora actualizada
+    }
+  }
+
+  esp_task_wdt_reset();
 }

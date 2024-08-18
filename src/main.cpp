@@ -19,6 +19,22 @@
 
 
 
+//ATENCION!! SE CAMBIO LO SIGUIENTE PARA LA PRUEBA MATSUYA, DEVOLVER A SU ESTADO ORIGINAL
+// IMPUTS ACTIVAS EN J2 (IN= 1,2,3,5,6,8)- SE DESACTIVARON
+//SE CAMBIO NOMBRE DE MAQUINA DE J2 A M14
+//SE CAMBIO  HOSTNAME DE  DeviceTejRecJ2 A  DeviceTejRecM14
+//SE CAMBIO IP DE 172, 16, 2, 210  A   172, 16, 2, 234
+//SE AGREGO  A LA PARTE FINAL DEL LOOP (QUITAR):   
+                  Serial.print("\nIntensidad de la señal Wi-Fi (RSSI): ");
+                  Serial.print(WiFi.RSSI());
+                  Serial.println(" dBm");
+                  delay(1000);
+//SE AGREGO A LA FUNCION WIFI CODIGO PARA QUE MUESTRE MAC DE AP Y NOMBRE DE AP (PUEDE QUEDAR) 
+//CAMBIAR DE TRUE A FALSE EN ACTIVAR/DESACTIVAR DEPURACION
+//CAMBIAR TODOS LOS SERIALPRINT POR DEBUG_PRINT
+
+
+
 
 //falta el codigo en el .ini de littlefs
 
@@ -99,12 +115,14 @@ DateTime now; //variable global para definir now que luego se usara para alamcen
 
 
 // Función que devuelve la fecha y la hora actual del RTC en formato (YYYYMMDDTHHMMSS)
+//Funcion para codigo unico de para y al final se le adjunta elcodigode la maquinaa la que pertenece
+//prueba poniendo R609  al final, sino funciona retirar R609.
 String getDateTimeCodeDS3231() {
 
 now = rtc_ds3231.now(); //Actualiza el tiempo en now desde DS3231 para usarlo en getDateTimeCodeDS3231() y getDateTimeDS3231()
 
   char buf[64];
-  sprintf(buf, "%04d%02d%02d%02d%02d%02d", now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second());
+  sprintf(buf, "%04d%02d%02d%02d%02d%02dR609", now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second());
   return String(buf);
 }
 
@@ -245,6 +263,11 @@ void reconnectWiFi() {
     
       DEBUG_PRINT("\n\n           Conexion WIFI Exitosa   ->    IP Tarjeta :  ");
       DEBUG_PRINT(WiFi.localIP());
+      Serial.print("\n           Conectado a : ");
+      Serial.println(WiFi.SSID());  // Muestra el SSID de la red
+
+      Serial.print("           BSSID: ");
+      Serial.println(WiFi.BSSIDstr());  // Muestra la dirección BSSID del punto de acceso
      
     }
     countReconectWifi = 0;
@@ -262,19 +285,19 @@ void reconnectWiFi() {
 
 /*--------VARIABLES GLOVALES----------*/
 
-String url_api = "https://developer.textildelvalle.pe:444/TEJRectilineoParoBE/api/RectilineoEvento/Write"; //http://192.168.54.161/BackEnd2/api/Rectilineo/Write
+String url_api = "https://developer.textildelvalle.pe:444/GENExtraccionSenalesBE/api/Evento/Write"; //http://192.168.54.161/BackEnd2/api/Rectilineo/Write
 
 
-const char* codDevice = "DeviceTejRecJ2";
-const char* codMaquina = "J2";    
-const char* codParoIN1 = "MP001";      //START/STOP             si  HIGH
-const char* codParoIN2 = "MP004";      //HILO SUPERIOR          si  LOW
-const char* codParoIN3 = "MP003";      //HILO LATERAL
-const char* codParoIN4 = "MP007";      //ANTIRREMOTADA
-const char* codParoIN5 = "MP009";      //PUERTA                 si  LOW
-const char* codParoIN6 = "MP006";      //CAIDA DE TELA          si  LOW
-const char* codParoIN7 = "MP005";      //LYCRA
-const char* codParoIN8 = "MP008";      //PUERTA LATERAL
+const char* codDevice = "DeviceTejRecR609";
+const char* codMaquina = "R609";    
+const char* codParoIN1 = "MP001";      //START/STOP               HIGH
+const char* codParoIN2 = "MP002";      //HILO SUPERIOR            HIHG  /LOW para J2
+const char* codParoIN3 = "MP003";      //HILO LATERAL             HIGH
+const char* codParoIN4 = "MP004";      //ANTIRREMOTADA
+const char* codParoIN5 = "MP005";      //PUERTA                   LOW
+const char* codParoIN6 = "MP006";      //CAIDA DE TELA            LOW
+const char* codParoIN7 = "MP007";      //LYCRA
+const char* codParoIN8 = "MP008";      //PUERTA LATERAL           LOW
 const char* codParoIN9 = "RPM";        //RPM 
 const char* codParoIN10 = "CONTADOR";  //CONTADOR DE UNIDADES
 
@@ -282,7 +305,7 @@ const char* codParoIN10 = "CONTADOR";  //CONTADOR DE UNIDADES
 volatile unsigned long count = 0;    
 
 /*--------DEFINE EL INTERVALO DE TIEMPO DE ENVIO SI HAY DATOS GUARDADOS----------*/
-int timeupdateSendHTTP = 15;
+int timeupdateSendHTTP = 1;
 const unsigned long interval1 = timeupdateSendHTTP * 60 * 1000; 
 unsigned long previousTime1 = 0;
 
@@ -632,7 +655,7 @@ void setup()
   if (attempts == MAX_ATTEMPTS) {
     Serial.println("\n\n No se pudo encontrar el modulo DS3231 valido");
     updateLedStatusRTC(); //alarma si no se logra actualizar datos de servidor ntp
-     //deberia activarse la alarma updateLedStatusRTC() por que no detectaria el año  valido
+     //deberia activarse la alarma updateLedStatusRTC() por que no detectaria el año valido
   }
 
 
@@ -694,13 +717,13 @@ void setup()
 
   
  debouncer1.attach(IN1);
- debouncer1.interval(600); // intervalo en ms
+ debouncer1.interval(1000); // intervalo en ms  //Dar 1 seg para q no detecte join stoll
 
  debouncer2.attach(IN2);
- debouncer2.interval(900); // intervalo en ms
+ debouncer2.interval(1000); // intervalo en ms
 
  debouncer3.attach(IN3);
- debouncer3.interval(900); // intervalo en ms
+ debouncer3.interval(1000); // intervalo en ms
  
  debouncer4.attach(IN4);
  debouncer4.interval(600); // intervalo en ms
@@ -730,16 +753,16 @@ void setup()
    }
  
  debouncer2.update();
- if (debouncer2.read() == LOW)
+ if (debouncer2.read() == HIGH)
    {
-   InputInfo initialInfo2 = {IN2, LOW};
+   InputInfo initialInfo2 = {IN2, HIGH};
    xQueueSend(queue, &initialInfo2, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
    }
 
    debouncer3.update();
- if (debouncer3.read() == LOW) 
+ if (debouncer3.read() == HIGH) 
    {
-   InputInfo initialInfo3 = {IN3, LOW};
+   InputInfo initialInfo3 = {IN3, HIGH};
    xQueueSend(queue, &initialInfo3, 0); //xQueueSend(queue, &initialInfo2, portMAX_DELAY);
    }
 
@@ -826,7 +849,7 @@ void loop()
   {
   if (WiFi.status() == WL_CONNECTED) 
   { 
-    if (millis() - startTimeoutForNTP >= 15000)  
+    if (millis() - startTimeoutForNTP >= 15000)   
     {
       updateTimeDevice();
     }
@@ -897,6 +920,27 @@ void loop()
    {
     DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
     DEBUG_PRINTLN(responseCode);
+
+            //quitar inicio
+            /*
+       String responseCodeStr; // Esta será la representación de responseCode que insertaremos en el JSON
+
+    if (responseCode < 0) {
+        // Si el código de respuesta es negativo, lo convertimos a positivo y lo precedemos con 'N'
+        responseCodeStr = "N" + String(-responseCode);
+    } else {
+        // Si el código de respuesta es positivo, simplemente lo precedemos con 'P'
+        responseCodeStr = "P" + String(responseCode);
+    }
+
+    // Antes de guardar el JSON, modifica "Rpm" para que sea responseCodeStr en lugar de count
+    json["CodParo"] = responseCodeStr;
+    String modifiedJson = json.as<String>();
+    */
+    //quita fin
+
+
+
     http.end();
     appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
    }
@@ -949,6 +993,27 @@ void loop()
    {
     DEBUG_PRINT("\n\n         Error en response al intentar enviar :  ");
     DEBUG_PRINTLN(responseCode);
+
+            //quitar inicio
+            /*
+       String responseCodeStr; // Esta será la representación de responseCode que insertaremos en el JSON
+
+    if (responseCode < 0) {
+        // Si el código de respuesta es negativo, lo convertimos a positivo y lo precedemos con 'N'
+        responseCodeStr = "N" + String(-responseCode);
+    } else {
+        // Si el código de respuesta es positivo, simplemente lo precedemos con 'P'
+        responseCodeStr = "P" + String(responseCode);
+    }
+
+    // Antes de guardar el JSON, modifica "Rpm" para que sea responseCodeStr en lugar de count
+    json["CodParo"] = responseCodeStr;
+    String modifiedJson = json.as<String>();
+    */
+    //quita fin
+
+
+
     http.end();
     appendDataToFile(json.as<String>());  //agrega el dato que no se envio al archivo data.text
    }
@@ -978,12 +1043,13 @@ void loop()
 
   
  /*-------------------------DIGITAL IMPUT 2---------------------------*/
+  
   if(info.pin == IN2)
 
   {
      static String  codStaticIN2 = "";
 
-        if(info.state == LOW) 
+        if(info.state == HIGH) 
 
         {  codStaticIN2 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
  
@@ -1089,17 +1155,17 @@ void loop()
     }
      
   }
-
+ 
   
 
  /*-------------------------DIGITAL IMPUT 3---------------------------*/
-/* NO ACTIVO EN   J2
+
   if(info.pin == IN3)
 
   {
      static String  codStaticIN3 = "";
 
-        if(info.state == LOW) 
+        if(info.state == HIGH) 
 
         {  codStaticIN3 = getDateTimeCodeDS3231();  //rtc_esp32.getTime("%Y%m%d%H%M%S");  // Actualizar el código cuando PIN1 esté en alto
  
@@ -1205,7 +1271,7 @@ void loop()
     }
      
   }
-*/
+ 
   
 
  /*-------------------------DIGITAL IMPUT 4---------------------------*/
@@ -1325,7 +1391,7 @@ void loop()
   
 
  /*-------------------------DIGITAL IMPUT 5---------------------------*/
- 
+ /*DESACTIVADO SOLO PARA PRUEBA DE MATSUYA (ACTIVAR PARA J2)
   if(info.pin == IN5)
 
   {
@@ -1437,10 +1503,11 @@ void loop()
     }
      
   }
-
+ */
   
 
  /*-------------------------DIGITAL IMPUT 6---------------------------*/
+ /*DESACTIVADO SOLO PARA PRUEBA DE MATSUYA (ACTIVAR PARA J2)
   if(info.pin == IN6)
 
   {
@@ -1552,7 +1619,7 @@ void loop()
     }
      
   }
-
+ */
   
 
  /*-------------------------DIGITAL IMPUT 7---------------------------*/
@@ -1672,7 +1739,7 @@ void loop()
   
 
  /*-------------------------DIGITAL IMPUT 8---------------------------*/
- /* NO ACTIVO EN   J2
+/*DESACTIVADO SOLO PARA PRUEBA DE MATSUYA (ACTIVAR PARA J2)
   if(info.pin == IN8)
 
   {
@@ -1784,7 +1851,7 @@ void loop()
     }
      
   }
-*/
+ */
   
 
  /*-------------------------DIGITAL IMPUT 9---------------------------*/
@@ -1901,26 +1968,6 @@ void loop()
      
   }
 */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -2083,6 +2130,15 @@ void loop()
  }
  
  */
+
+
+
+//QUITAR
+    //Serial.print("\nIntensidad de la señal Wi-Fi (RSSI): ");
+    //Serial.print(WiFi.RSSI());
+    //Serial.println(" dBm");
+    //delay(1000);
+
 
 
 
